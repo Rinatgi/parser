@@ -21,7 +21,6 @@ class Parser:
     def start_parsing(self):
         """
             запускаем наш парсинг сайта Леруа Мерлен
-
         """
         self.browser = webdriver.Chrome()
         self.browser.get('http://kazan.leroymerlin.ru/')
@@ -125,92 +124,6 @@ class Parser:
     def get_catalog(self):
         return self.tree_catalog
 
-    def parsing_items(self, path_subdirectory, subdirectory_id):
-        """
-            Получаем список товаров из категорий: имена, цену и т.д.
-
-        """
-        browser = webdriver.Chrome()
-        url = 'https://kazan.leroymerlin.ru/' + path_subdirectory
-        browser.implicitly_wait(30)
-        browser.get(url)
-        page = True
-        while page:
-            items_name = browser.find_elements_by_css_selector("span[class='t9jup0e_plp p1h8lbu4_plp']")
-            name_product_list = []
-            for item_name in items_name:
-                name_product = item_name.text
-                name_product_list.append(name_product)
-            self.product_list.append(name_product_list)
-            items_href = browser.find_elements_by_css_selector("a[data-qa ='product-name']")
-            product_path_list = []
-            for item_href in items_href:
-                product_path = item_href.get_attribute('href')
-                product_path_list.append(product_path)
-            self.product_list.append(product_path_list)
-            items_price = browser.find_elements_by_css_selector\
-                (
-                 "p[class='t3y6ha_plp xc1n09g_plp p1q9hgmc_plp']"
-                )
-            product_price_list = []
-            for item_price in items_price:
-                product_price_str = item_price.text
-                product_price = product_price_str.replace(" ", "")
-                product_price = product_price.replace(",", ".")
-                product_price = float(product_price)
-                product_price_list.append(product_price)
-
-            self.product_list.append(product_price_list)
-            units_measure = browser.find_elements_by_css_selector\
-                (
-                 "p[class='t3y6ha_plp x9a98_plp pb3lgg7_plp']"
-                )
-            init_list = []
-            for init_measure in units_measure:
-                init = init_measure.text
-                init_list.append(init)
-            self.product_list.append(init_list)
-            len_list = len(name_product_list) - 1
-            n = 0
-            while n < len_list:
-                self.cur.execute(
-                    """
-                        INSERT INTO product(name_product, path_product, item_product, fk_subdirectory_id) 
-                        VALUES(%(name)s, %(path)s, %(init)s, %(subdirectory_id)s) RETURNING product_id;
-                    """,
-                    {'name': name_product_list[n],
-                     'path': product_path_list[n],
-                     'init': init_list[n],
-                     'subdirectory_id': subdirectory_id
-                     }
-                     )
-                product_id = self.cur.fetchone()[0]
-                self.cur.execute(
-                    """
-                        INSERT INTO price_product(date_price, price_product, fk_product_id) 
-                        VALUES(%(date)s, %(price)s, %(product_id)s) ;
-                    """,
-                    {
-                        'price': product_price_list[n],
-                        'date': datetime.date.today(),
-                        'product_id': product_id
-                    }
-                    )
-                self.connection.commit()
-                n += 1
-
-            try:
-                next_page = WebDriverWait(browser, 20).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "a[data-qa-pagination-item='right']"))
-                )
-                next_page.click()
-                page = True
-                time.sleep(10)
-            except:
-                self.product_list.clear()
-                page = False
-                browser.close()
-
     def get_path_subdirectory(self, subdirectory):
         self.cur.execute(
             """
@@ -240,25 +153,17 @@ class Parser:
     def get_product_info(self, product_name):
         product_dict = {}
         self.cur.execute(
-            """
-                SELECT * FROM product
-            """
+            "SELECT * FROM product WHERE name_product=%s", (product_name,)
         )
-        results = self.cur.fetchall()
-        for result in results:
-            if result[1] == product_name:
-                self.cur.execute(
-                    """
-                        SELECT * FROM price_product                    
-                    """
-                )
-                product_price_results = self.cur.fetchall()
-                for price_result in product_price_results:
-                    if price_result[3] == result[0]:
-                        product_dict.update(dict(path=result[2],
-                                                 price=price_result[2],
-                                                 date=price_result[1],
-                                                 item_product=result[3])
-                                            )
-                        print(product_dict)
-                        return product_dict
+        result = self.cur.fetchone()
+        self.cur.execute(
+            "SELECT date_price, price_product  FROM price_product WHERE fk_product_id=%s", (result[0],)
+        )
+        product_price_results = self.cur.fetchall()
+
+        product_dict.update(dict(path=result[2],
+                                 price_result=product_price_results,
+                                 item_product=result[3],
+                                 path_image=result[5])
+                            )
+        return product_dict
